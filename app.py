@@ -1,73 +1,66 @@
 from flask import Flask, request, jsonify
 from dateutil import parser
 from fuzzywuzzy import process
-from ticker_map import ticker_map
-import sqlite3
 import yfinance as yf
+import sqlite3
+from ticker_map import ticker_map
+import datetime
+
 app = Flask(__name__)
 
-
-# Function that retrieves stock data for a specific date
+# Get stock data from SQLite for AAPL only
 def get_stock_price_by_data(date):
-    # Connects to (or creates if not exists) the SQLite database file in the db folder
     connection = sqlite3.connect('db/finance_data.db')
-    # Creates a cursor (messenger) to send SQL commands to the connected database
     cursor = connection.cursor()
-    # Uses the cursor to execute a SQL SELECT query with a placeholder for the date
     cursor.execute("SELECT * FROM stock_data WHERE Date = ?", (date,))
-    # Fetches all matching rows returned by the query and stores them in result
     result = cursor.fetchall()
-    # Closes the connection to the database 
     connection.close()
-    # Returns the list of retrieved stock data rows
     return result
 
-
+# Match user input to known company names using fuzzy match (no API call)
 def extract_ticker(user_input):
     user_input = user_input.lower()
     best_match, score = process.extractOne(user_input, ticker_map.keys())
-
     if score > 80:
         return ticker_map[best_match]
     return None
 
-
-
 @app.route('/chat', methods=['POST'])
 def chat():
     user_input = request.json.get('message')
-
-    # Step 1: Extract ticker from user message
     ticker = extract_ticker(user_input)
-    if not ticker:
-        return jsonify({"error": "Could not identify a valid stock. Try something like 'Apple' or 'AAPL'."})
 
-    # Step 2: Check if asking for 'today' or 'now'
+    if not ticker:
+        return jsonify({"error": "Could not identify a valid stock. Try 'Apple', 'Tesla', etc."})
+
+    # Handle real-time requests like 'today' or 'now'
     if "now" in user_input.lower() or "today" in user_input.lower():
         try:
-            info = yf.Ticker(ticker).info
+            today = datetime.datetime.today().strftime("%Y-%m-%d")
+            live_data = yf.Ticker(ticker).history(start=today, end=today)
 
-            if "regularMarketPrice" not in info:
-                return jsonify({"error": f"No price data found for {ticker}."})
+            if live_data.empty:
+                return jsonify({"error": f"No data found for {ticker} today."})
 
+            row = live_data.iloc[0]
             return jsonify({
                 "Ticker": ticker,
-                "Price": info["regularMarketPrice"],
-                "Currency": info.get("currency", "USD"),
-                "Exchange": info.get("exchange", "N/A"),
-                "Source": "Live API"
+                "Date": today,
+                "Open": row["Open"],
+                "High": row["High"],
+                "Low": row["Low"],
+                "Close": row["Close"],
+                "Volume": row["Volume"],
+                "Source": "Live API (via history)"
             })
         except Exception as e:
             return jsonify({"error": f"Live price fetch failed: {str(e)}"})
 
-
-
-    # Step 3: Try to extract a specific date
+    # Handle historical queries
     try:
         parsed_date = parser.parse(user_input, fuzzy=True).date()
         date = parsed_date.strftime("%Y-%m-%d")
 
-        # If AAPL, use local DB
         if ticker == "AAPL":
             result = get_stock_price_by_data(date)
             if result:
@@ -84,12 +77,10 @@ def chat():
                 })
             else:
                 return jsonify({"error": f"No historical data found for AAPL on {date}."})
-        
-        # If any other ticker, fallback to live API
         else:
-            live_info = yf.Ticker(ticker).history(start=date, end=date)
-            if not live_info.empty:
-                row = live_info.iloc[0]
+            hist_data = yf.Ticker(ticker).history(start=date, end=date)
+            if not hist_data.empty:
+                row = hist_data.iloc[0]
                 return jsonify({
                     "Ticker": ticker,
                     "Date": date,
@@ -101,10 +92,10 @@ def chat():
                     "Source": "Live API (Historical)"
                 })
             else:
-                return jsonify({"error": f"No data found for {ticker} on {date} from API."})
+                return jsonify({"error": f"No data found for {ticker} on {date}."})
 
     except Exception as e:
-        return jsonify({"error": "Could not understand the date. Use formats like 'August 1, 2023' or '2023-08-01'."})
+        return jsonify({"error": "Could not understand the date. Try 'August 1, 2023' or '2023-08-01'."})
 
 if __name__ == '__main__':
     app.run(debug=True)
