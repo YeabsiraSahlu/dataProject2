@@ -1,8 +1,6 @@
 Finance Chatbot Project
 Created by: Miky Asmare, Soliyana Yohannes, Nathan Ressom, and Yeabsira Sahlu
 
-
-
 Overview
 This project demonstrates the development of a finance chatbot using Flask that integrates both local and live data sources to provide historical and real-time stock information. The project fulfills the requirements for combining data from an ETL pipeline and a live API and includes parsing logic, error handling, and deployment readiness.
 

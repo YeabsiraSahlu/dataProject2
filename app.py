@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 from dateutil import parser
 from fuzzywuzzy import process
 from ticker_map import ticker_map
+import sqlite3
+import yfinance as yf
 app = Flask(__name__)
 
 
@@ -26,11 +28,9 @@ def extract_ticker(user_input):
     best_match, score = process.extractOne(user_input, ticker_map.keys())
 
     if score > 80:
-        ticker = ticker_map[best_match]
-        info = yf.Ticker(ticker).info
-        if "regularMarketPrice" in info:
-            return ticker
+        return ticker_map[best_match]
     return None
+
 
 
 @app.route('/chat', methods=['POST'])
@@ -45,16 +45,22 @@ def chat():
     # Step 2: Check if asking for 'today' or 'now'
     if "now" in user_input.lower() or "today" in user_input.lower():
         try:
-            live_info = yf.Ticker(ticker).info
+            info = yf.Ticker(ticker).info
+
+            if "regularMarketPrice" not in info:
+                return jsonify({"error": f"No price data found for {ticker}."})
+
             return jsonify({
                 "Ticker": ticker,
-                "Price": live_info.get("regularMarketPrice", "N/A"),
-                "Currency": live_info.get("currency", "USD"),
-                "Exchange": live_info.get("exchange", "N/A"),
+                "Price": info["regularMarketPrice"],
+                "Currency": info.get("currency", "USD"),
+                "Exchange": info.get("exchange", "N/A"),
                 "Source": "Live API"
             })
         except Exception as e:
             return jsonify({"error": f"Live price fetch failed: {str(e)}"})
+
+
 
     # Step 3: Try to extract a specific date
     try:
@@ -99,3 +105,6 @@ def chat():
 
     except Exception as e:
         return jsonify({"error": "Could not understand the date. Use formats like 'August 1, 2023' or '2023-08-01'."})
+
+if __name__ == '__main__':
+    app.run(debug=True)
